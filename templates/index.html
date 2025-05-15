@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kanari</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
+</head>
+<body>
+    <main>
+        <h1>Kanari</h1>
+
+        {% if metrics.error %}
+        <section class="result invalid">
+            <p>Error: {{ metrics.error }}</p>
+        </section>
+        {% endif %}
+
+        <h2>MariaDB/MySQL Stats</h2>
+        <table class="metrics-table">
+            <thead>
+                <tr>
+                    <th>Operation</th>
+                    <th>Time (ms)</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>MariaDB/MySQL connection</td>
+                    <td id="db-connect-time">{{ metrics.db_connect_time }}</td>
+                </tr>
+                {% if not metrics.error %}
+                <tr>
+                    <td>Initial data fetch</td>
+                    <td id="first-fetch-time">{{ metrics.first_fetch_time }}</td>
+                </tr>
+                <tr>
+                    <td>Data fetch (best of 10)</td>
+                    <td id="fetch-best">{{ metrics.fetch_best }}</td>
+                </tr>
+                <tr>
+                    <td>Data fetch (worst of 10)</td>
+                    <td id="fetch-worst">{{ metrics.fetch_worst }}</td>
+                </tr>
+                <tr>
+                    <td>Data fetch (average of 10)</td>
+                    <td id="fetch-avg">{{ metrics.fetch_avg }}</td>
+                </tr>
+                <tr>
+                    <td>Closing the MariaDB/MySQL connection</td>
+                    <td id="db-close-time">{{ metrics.db_close_time }}</td>
+                </tr>
+                {% endif %}
+            </tbody>
+        </table>
+
+        <h2>S3 Stats</h2>
+        <table class="metrics-table">
+            <thead>
+                <tr>
+                    <th>Operation</th>
+                    <th>Time (ms)</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% if metrics.s3_error %}
+                <tr class="error-row">
+                    <td>S3 Error</td>
+                    <td id="s3-error">{{ metrics.s3_error }}</td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td>S3 client initialization</td>
+                    <td id="s3-client-init-time">{{ metrics.s3_client_init_time }}</td>
+                </tr>
+                <tr>
+                    <td>Bucket creation</td>
+                    <td id="s3-bucket-create-time">{{ metrics.s3_bucket_create_time }}</td>
+                </tr>
+                <tr>
+                    <td>File upload (PUT)</td>
+                    <td id="s3-put-time">{{ metrics.s3_put_time }}</td>
+                </tr>
+                <tr>
+                    <td>File download (GET) - best of 5</td>
+                    <td id="s3-get-best">{{ metrics.s3_get_best }}</td>
+                </tr>
+                <tr>
+                    <td>File download (GET) - worst of 5</td>
+                    <td id="s3-get-worst">{{ metrics.s3_get_worst }}</td>
+                </tr>
+                <tr>
+                    <td>File download (GET) - average of 5</td>
+                    <td id="s3-get-avg">{{ metrics.s3_get_avg }}</td>
+                </tr>
+                <tr>
+                    <td>File deletion</td>
+                    <td id="s3-delete-file-time">{{ metrics.s3_delete_file_time }}</td>
+                </tr>
+                <tr>
+                    <td>Bucket deletion</td>
+                    <td id="s3-delete-bucket-time">{{ metrics.s3_delete_bucket_time }}</td>
+                </tr>
+                {% endif %}
+            </tbody>
+        </table>
+
+        <h2>Template Performance</h2>
+        <table class="metrics-table">
+            <thead>
+                <tr>
+                    <th>Operation</th>
+                    <th>Time (ms)</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>Loading HTML templates</td>
+                    <td id="template-read-time">{{ metrics.template_read_time }}</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h2>Total Page Serve Time</h2>
+        <p class="info-text">This includes all database and S3 operations plus template rendering</p>
+        <table class="metrics-table">
+            <thead>
+                <tr>
+                    <th>Operation</th>
+                    <th>Time (ms)</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr class="total-row">
+                    <td>Complete request processing time</td>
+                    <td id="total-time">{{ metrics.total_time }}</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <button id="reconnect-btn" class="button">Refresh All Statistics</button>
+
+        <div id="loading" class="loading hidden">Running tests...</div>
+
+        <footer>Alexander F. Rødseth &lt;alerod@redpill-linpro.com&gt; for Redpill-Linpro, BSD-3 licensed</footer>
+    </main>
+
+    <script>
+        document.getElementById('reconnect-btn').addEventListener('click', function() {
+            const loadingEl = document.getElementById('loading');
+            loadingEl.classList.remove('hidden');
+
+            fetch('/reconnect', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                window.location.reload();
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                loadingEl.classList.add('hidden');
+                alert('Error refreshing statistics: ' + error);
+            });
+        });
+    </script>
+</body>
+</html>

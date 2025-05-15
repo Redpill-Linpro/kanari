@@ -1,0 +1,29 @@
+services:
+  webapp:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      DB_HOST: db
+      DB_NAME: kanari
+      DB_USER: kanari_user
+      DB_PASSWORD: kanari_pass
+      S3_ACCESS_KEY: _
+      S3_SECRET_KEY: _
+      S3_ENDPOINT: _
+    depends_on:
+      - db
+
+  db:
+    image: mariadb:latest
+    environment:
+      MYSQL_DATABASE: kanari
+      MYSQL_USER: kanari_user
+      MYSQL_PASSWORD: kanari_pass
+      MYSQL_ROOT_PASSWORD: rootpass
+    volumes:
+      - ./sql:/docker-entrypoint-initdb.d
+      - db-data:/var/lib/mysql
+
+volumes:
+  db-data:
