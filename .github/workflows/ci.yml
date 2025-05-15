@@ -22,7 +22,7 @@ jobs:
         ports:
           - 3306:3306
         options: >-
-          --health-cmd="mysqladmin ping --silent"
+          --health-cmd="mysqladmin ping -h localhost -u test_user -ptest_password --silent"
           --health-interval=10s
           --health-timeout=5s
           --health-retries=5
@@ -37,7 +37,7 @@ jobs:
           --health-cmd="curl -f http://localhost:9000/minio/health/ready || exit 1"
           --health-interval=10s
           --health-timeout=5s
-          --health-retries=5
+          --health-retries=3
       postgres:
         image: postgres:latest
         env:
