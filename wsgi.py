@@ -12,6 +12,7 @@ import sys
 import tempfile
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
 logging.basicConfig(
     level=logging.INFO,
@@ -22,6 +23,11 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
+# Executor for background service tests
+executor = ThreadPoolExecutor(max_workers=4)
+# Timeout for service tests in seconds
+TIMEOUT_SECONDS = 3
+
 http_host = os.getenv("HOST", "0.0.0.0")
 http_port = int(os.getenv("PORT", 5000))
 
@@ -31,6 +37,14 @@ db_database = os.getenv("DB_NAME", "kanari")
 db_table = os.getenv("DB_TABLE", "kanari")
 db_user = os.getenv("DB_USER", "alexander")
 db_password = os.getenv("DB_PASSWORD", "")
+
+# PostgreSQL configuration (optional, if provided)
+pg_host = os.getenv("PG_HOST", db_host)
+pg_port = int(os.getenv("PG_PORT", 5432))
+pg_database = os.getenv("PG_DATABASE", db_database)
+pg_table = os.getenv("PG_TABLE", db_table)
+pg_user = os.getenv("PG_USER", db_user)
+pg_password = os.getenv("PG_PASSWORD", db_password)
 
 s3_access_key = os.getenv("S3_ACCESS_KEY", "")
 s3_secret_key = os.getenv("S3_SECRET_KEY", "")
@@ -72,12 +86,12 @@ def collect_db_stats():
     conn_start = time.time()
     conn = db_connect()
     conn_time = (time.time() - conn_start) * 1000
-    metrics["db_connect_time"] = round(conn_time, 2)
+    metrics["mysql_connect_time"] = round(conn_time, 2)
 
     if not conn:
         return {
-            "error": "Could not connect to database. Check configuration.",
-            "db_connect_time": metrics["db_connect_time"],
+            "mysql_error": "Could not connect to MariaDB/MySQL. Check configuration.",
+            "mysql_connect_time": metrics["mysql_connect_time"],
         }
 
     try:
@@ -87,7 +101,7 @@ def collect_db_stats():
         first_fetch_start = time.time()
         cur.execute(query)
         row = cur.fetchone()
-        metrics["first_fetch_time"] = round((time.time() - first_fetch_start) * 1000, 2)
+        metrics["mysql_first_fetch_time"] = round((time.time() - first_fetch_start) * 1000, 2)
 
         fetch_times = []
         for _ in range(10):
@@ -96,14 +110,14 @@ def collect_db_stats():
             cur.fetchone()
             fetch_times.append((time.time() - fetch_start) * 1000)
 
-        metrics["fetch_worst"] = round(max(fetch_times), 2)
-        metrics["fetch_best"] = round(min(fetch_times), 2)
-        metrics["fetch_avg"] = round(statistics.mean(fetch_times), 2)
+        metrics["mysql_fetch_worst"] = round(max(fetch_times), 2)
+        metrics["mysql_fetch_best"] = round(min(fetch_times), 2)
+        metrics["mysql_fetch_avg"] = round(statistics.mean(fetch_times), 2)
 
         close_start = time.time()
         cur.close()
         conn.close()
-        metrics["db_close_time"] = round((time.time() - close_start) * 1000, 2)
+        metrics["mysql_close_time"] = round((time.time() - close_start) * 1000, 2)
 
         return metrics
 
@@ -113,7 +127,7 @@ def collect_db_stats():
                 conn.close()
             except:
                 pass
-        return {"error": str(e), "db_connect_time": metrics.get("db_connect_time", 0)}
+        return {"mysql_error": str(e), "mysql_connect_time": metrics.get("mysql_connect_time", 0)}
 
 
 def collect_s3_stats():
@@ -239,8 +253,15 @@ def index():
     start_time = time.time()
     logger.info("Processing index request")
 
-    db_metrics = collect_db_stats()
-    s3_metrics = collect_s3_stats()
+    # Run service tests with timeout
+    db_future = executor.submit(collect_db_stats)
+    s3_future = executor.submit(collect_s3_stats)
+    try:
+        db_metrics = db_future.result(timeout=TIMEOUT_SECONDS)
+        s3_metrics = s3_future.result(timeout=TIMEOUT_SECONDS)
+    except TimeoutError:
+        logger.error('Timeout waiting for service tests')
+        return render_template('error.html', error_title='504 Gateway Timeout', error_message='Service request timed out'), 504
 
     metrics = {**db_metrics, **s3_metrics}
 
@@ -258,8 +279,15 @@ def reconnect():
     start_time = time.time()
     logger.info("Processing reconnect request")
 
-    db_metrics = collect_db_stats()
-    s3_metrics = collect_s3_stats()
+    # Run service tests with timeout
+    db_future = executor.submit(collect_db_stats)
+    s3_future = executor.submit(collect_s3_stats)
+    try:
+        db_metrics = db_future.result(timeout=TIMEOUT_SECONDS)
+        s3_metrics = s3_future.result(timeout=TIMEOUT_SECONDS)
+    except TimeoutError:
+        logger.error('Timeout waiting for service tests')
+        return jsonify({'error': 'Service request timed out'}), 504
 
     metrics = {**db_metrics, **s3_metrics}
 

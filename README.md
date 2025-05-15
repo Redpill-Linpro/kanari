@@ -1,5 +1,7 @@
 # Kanari
 
+<img src="img/kanari.png" alt="Kanari" align="right"></img>
+
 MariaDB/MySQL, S3 and HTTP benchmark/status application for the Cloud.
 
 * Uses Python and Flask.
