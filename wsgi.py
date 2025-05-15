@@ -3,6 +3,7 @@
 
 from botocore.exceptions import ClientError
 from flask import Flask, render_template, jsonify
+
 import boto3
 import logging
 import mariadb
@@ -12,6 +13,7 @@ import sys
 import tempfile
 import time
 import uuid
+
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
 logging.basicConfig(
@@ -20,6 +22,13 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)],
 )
 logger = logging.getLogger(__name__)
+
+try:
+    import psycopg2
+    import psycopg2.extras
+except ImportError:
+    psycopg2 = None
+    logger.warning("PostgreSQL support is not available (missing psycopg2).")
 
 app = Flask(__name__)
 
@@ -50,6 +59,7 @@ s3_access_key = os.getenv("S3_ACCESS_KEY", "")
 s3_secret_key = os.getenv("S3_SECRET_KEY", "")
 s3_endpoint = os.getenv("S3_ENDPOINT", "https://situla.bitbit.net")
 s3_bucket = os.getenv("S3_BUCKET", "redpill-linpro-kanari")
+
 
 def db_connect(max_retries=5, retry_delay=2):
     """Try reconnecting to the MariaDB/MySQL database if the initial connection fails."""
@@ -101,7 +111,9 @@ def collect_db_stats():
         first_fetch_start = time.time()
         cur.execute(query)
         row = cur.fetchone()
-        metrics["mysql_first_fetch_time"] = round((time.time() - first_fetch_start) * 1000, 2)
+        metrics["mysql_first_fetch_time"] = round(
+            (time.time() - first_fetch_start) * 1000, 2
+        )
 
         fetch_times = []
         for _ in range(10):
@@ -127,7 +139,64 @@ def collect_db_stats():
                 conn.close()
             except:
                 pass
-        return {"mysql_error": str(e), "mysql_connect_time": metrics.get("mysql_connect_time", 0)}
+        return {
+            "mysql_error": str(e),
+            "mysql_connect_time": metrics.get("mysql_connect_time", 0),
+        }
+
+
+## PostgreSQL stats collection
+def collect_pg_stats():
+    """Collect PostgreSQL database statistics"""
+    metrics = {}
+    conn_start = time.time()
+    conn = None
+    try:
+        conn = psycopg2.connect(
+            host=pg_host,
+            user=pg_user,
+            password=pg_password,
+            dbname=pg_database,
+            port=pg_port,
+        )
+        metrics["postgres_connect_time"] = round((time.time() - conn_start) * 1000, 2)
+
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        query = f"SELECT * FROM {pg_table} ORDER BY (SELECT NULL) DESC LIMIT 1"
+
+        first_fetch_start = time.time()
+        cur.execute(query)
+        cur.fetchone()
+        metrics["postgres_first_fetch_time"] = round(
+            (time.time() - first_fetch_start) * 1000, 2
+        )
+
+        fetch_times = []
+        for _ in range(10):
+            fetch_start = time.time()
+            cur.execute(query)
+            cur.fetchone()
+            fetch_times.append((time.time() - fetch_start) * 1000)
+
+        metrics["postgres_fetch_worst"] = round(max(fetch_times), 2)
+        metrics["postgres_fetch_best"] = round(min(fetch_times), 2)
+        metrics["postgres_fetch_avg"] = round(statistics.mean(fetch_times), 2)
+
+        close_start = time.time()
+        cur.close()
+        conn.close()
+        metrics["postgres_close_time"] = round((time.time() - close_start) * 1000, 2)
+        return metrics
+    except Exception as e:
+        if conn:
+            try:
+                conn.close()
+            except:
+                pass
+        return {
+            "postgres_error": str(e),
+            "postgres_connect_time": metrics.get("postgres_connect_time", 0),
+        }
 
 
 def collect_s3_stats():
@@ -141,9 +210,10 @@ def collect_s3_stats():
     download_path = None
 
     try:
+        # Use existing bucket name from configuration
+        test_bucket_name = s3_bucket
+        # Timestamp for test object key generation
         timestamp = int(time.time())
-        random_suffix = str(uuid.uuid4())[:8]
-        test_bucket_name = f"kanari-stats-{timestamp}-{random_suffix}"
 
         s3_client_start = time.time()
         s3_client = boto3.client(
@@ -155,21 +225,6 @@ def collect_s3_stats():
         metrics["s3_client_init_time"] = round(
             (time.time() - s3_client_start) * 1000, 2
         )
-
-        bucket_create_start = time.time()
-        try:
-            s3_client.create_bucket(Bucket=test_bucket_name)
-            logger.info(f"Created test bucket: {test_bucket_name}")
-            metrics["s3_bucket_create_time"] = round(
-                (time.time() - bucket_create_start) * 1000, 2
-            )
-        except Exception as e:
-            logger.error(f"Failed to create test bucket: {e}")
-            return {
-                "s3_error": f"Could not create test bucket: {str(e)}",
-                "s3_client_init_time": metrics.get("s3_client_init_time", 0),
-            }
-
 
         test_data = b"This is a test file for S3 performance testing."
         test_key = f"stats-test-{timestamp}.txt"
@@ -216,17 +271,6 @@ def collect_s3_stats():
             logger.error(f"Error deleting test file: {e}")
             metrics["s3_delete_file_error"] = str(e)
 
-        delete_bucket_start = time.time()
-        try:
-            s3_client.delete_bucket(Bucket=test_bucket_name)
-            logger.info(f"Deleted test bucket: {test_bucket_name}")
-            metrics["s3_delete_bucket_time"] = round(
-                (time.time() - delete_bucket_start) * 1000, 2
-            )
-        except Exception as e:
-            logger.warning(f"Failed to delete test bucket {test_bucket_name}: {e}")
-            metrics["s3_delete_bucket_error"] = str(e)
-
         return metrics
 
     except ClientError as e:
@@ -254,23 +298,35 @@ def index():
     logger.info("Processing index request")
 
     # Run service tests with timeout
-    db_future = executor.submit(collect_db_stats)
+    mysql_future = executor.submit(collect_db_stats)
+    pg_future = executor.submit(collect_pg_stats)
     s3_future = executor.submit(collect_s3_stats)
     try:
-        db_metrics = db_future.result(timeout=TIMEOUT_SECONDS)
+        mysql_metrics = mysql_future.result(timeout=TIMEOUT_SECONDS)
+        pg_metrics = pg_future.result(timeout=TIMEOUT_SECONDS)
         s3_metrics = s3_future.result(timeout=TIMEOUT_SECONDS)
     except TimeoutError:
-        logger.error('Timeout waiting for service tests')
-        return render_template('error.html', error_title='504 Gateway Timeout', error_message='Service request timed out'), 504
+        logger.error("Timeout waiting for service tests")
+        return (
+            render_template(
+                "error.html",
+                error_title="504 Gateway Timeout",
+                error_message="Service request timed out",
+            ),
+            504,
+        )
 
-    metrics = {**db_metrics, **s3_metrics}
+    metrics = {**mysql_metrics, **pg_metrics, **s3_metrics}
 
     template_start = time.time()
-    response = render_template("index.html", metrics=metrics)
-    metrics["template_read_time"] = round((time.time() - template_start) * 1000, 2)
 
+    # Render the template here, just to measure the performance
+    response = render_template("index.html", metrics=metrics)
+
+    metrics["template_read_time"] = round((time.time() - template_start) * 1000, 2)
     metrics["total_time"] = round((time.time() - start_time) * 1000, 2)
 
+    # Fill in the newly recorded metrics before returning
     return render_template("index.html", metrics=metrics)
 
 
@@ -280,16 +336,18 @@ def reconnect():
     logger.info("Processing reconnect request")
 
     # Run service tests with timeout
-    db_future = executor.submit(collect_db_stats)
+    mysql_future = executor.submit(collect_db_stats)
+    pg_future = executor.submit(collect_pg_stats)
     s3_future = executor.submit(collect_s3_stats)
     try:
-        db_metrics = db_future.result(timeout=TIMEOUT_SECONDS)
+        mysql_metrics = mysql_future.result(timeout=TIMEOUT_SECONDS)
+        pg_metrics = pg_future.result(timeout=TIMEOUT_SECONDS)
         s3_metrics = s3_future.result(timeout=TIMEOUT_SECONDS)
     except TimeoutError:
-        logger.error('Timeout waiting for service tests')
-        return jsonify({'error': 'Service request timed out'}), 504
+        logger.error("Timeout waiting for service tests")
+        return jsonify({"error": "Service request timed out"}), 504
 
-    metrics = {**db_metrics, **s3_metrics}
+    metrics = {**mysql_metrics, **pg_metrics, **s3_metrics}
 
     template_start = time.time()
     render_template("index.html", metrics=metrics)

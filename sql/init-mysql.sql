@@ -1,6 +1,6 @@
 -- Create a "kanari" table and insert dummy data, so that the application has something to retrieve
 
-CREATE TABLE kanari (
+CREATE TABLE IF NOT EXISTS kanari (
     id INT AUTO_INCREMENT PRIMARY KEY,
     a INT NOT NULL,
     b INT NOT NULL,
