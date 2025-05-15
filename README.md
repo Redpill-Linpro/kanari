@@ -1,6 +1,6 @@
 # Kanari
 
-<img src="img/logo.svg" alt="Kanari" align="right"></img>
+<img src="img/logo.svg" alt="Kanari" align="right" width="64px"></img>
 
 MariaDB/MySQL, S3 and HTTP benchmark/status application for the Cloud.
 
