@@ -28,28 +28,72 @@
             <tbody>
                 <tr>
                     <td>MariaDB/MySQL connection</td>
-                    <td id="db-connect-time">{{ metrics.db_connect_time }}</td>
+                    <td id="mysql-connect-time">{{ metrics.mysql_connect_time }}</td>
                 </tr>
-                {% if not metrics.error %}
+                {% if not metrics.mysql_error %}
                 <tr>
                     <td>Initial data fetch</td>
-                    <td id="first-fetch-time">{{ metrics.first_fetch_time }}</td>
+                    <td id="mysql-first-fetch-time">{{ metrics.mysql_first_fetch_time }}</td>
                 </tr>
                 <tr>
                     <td>Data fetch (best of 10)</td>
-                    <td id="fetch-best">{{ metrics.fetch_best }}</td>
+                    <td id="mysql-fetch-best">{{ metrics.mysql_fetch_best }}</td>
                 </tr>
                 <tr>
                     <td>Data fetch (worst of 10)</td>
-                    <td id="fetch-worst">{{ metrics.fetch_worst }}</td>
+                    <td id="mysql-fetch-worst">{{ metrics.mysql_fetch_worst }}</td>
                 </tr>
                 <tr>
                     <td>Data fetch (average of 10)</td>
-                    <td id="fetch-avg">{{ metrics.fetch_avg }}</td>
+                    <td id="mysql-fetch-avg">{{ metrics.mysql_fetch_avg }}</td>
                 </tr>
                 <tr>
                     <td>Closing the MariaDB/MySQL connection</td>
-                    <td id="db-close-time">{{ metrics.db_close_time }}</td>
+                    <td id="mysql-close-time">{{ metrics.mysql_close_time }}</td>
+                </tr>
+                {% endif %}
+            </tbody>
+        </table>
+
+        <h2>PostgreSQL Stats</h2>
+        <table class="metrics-table">
+            <thead>
+                <tr>
+                    <th>Operation</th>
+                    <th>Time (ms)</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% if metrics.postgres_error %}
+                <tr class="error-row">
+                    <td>Error</td>
+                    <td id="postgres-error">{{ metrics.postgres_error }}</td>
+                </tr>
+                {% endif %}
+                <tr>
+                    <td>PostgreSQL connection</td>
+                    <td id="postgres-connect-time">{{ metrics.postgres_connect_time }}</td>
+                </tr>
+                {% if not metrics.postgres_error %}
+                <tr>
+                    <td>Initial data fetch</td>
+                    <td id="postgres-first-fetch-time">{{ metrics.postgres_first_fetch_time }}</td>
+                </tr>
+                <tr>
+                    <td>Data fetch (best of 10)</td>
+                    <td id="postgres-fetch-best">{{ metrics.postgres_fetch_best }}</td>
+                </tr>
+                <tr>
+                    <td>Data fetch (worst of 10)</td>
+                    <td id="postgres-fetch-worst">{{ metrics.postgres_fetch_worst }}</td>
+                </tr>
+                <tr>
+                    <td>Data fetch (average of 10)</td>
+                    <td id="postgres-fetch-avg">{{ metrics.postgres_fetch_avg }}</td>
+                </tr>
+                <tr>
+                    <td>Closing the PostgreSQL connection</td>
+                    <td id="postgres-close-time">{{ metrics.postgres_close_time }}</td>
                 </tr>
                 {% endif %}
             </tbody>
@@ -75,10 +119,6 @@
                     <td id="s3-client-init-time">{{ metrics.s3_client_init_time }}</td>
                 </tr>
                 <tr>
-                    <td>Bucket creation</td>
-                    <td id="s3-bucket-create-time">{{ metrics.s3_bucket_create_time }}</td>
-                </tr>
-                <tr>
                     <td>File upload (PUT)</td>
                     <td id="s3-put-time">{{ metrics.s3_put_time }}</td>
                 </tr>
@@ -97,10 +137,6 @@
                 <tr>
                     <td>File deletion</td>
                     <td id="s3-delete-file-time">{{ metrics.s3_delete_file_time }}</td>
-                </tr>
-                <tr>
-                    <td>Bucket deletion</td>
-                    <td id="s3-delete-bucket-time">{{ metrics.s3_delete_bucket_time }}</td>
                 </tr>
                 {% endif %}
             </tbody>
