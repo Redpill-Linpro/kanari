@@ -1,0 +1,12 @@
+CREATE TABLE IF NOT EXISTS kanari (
+    id SERIAL PRIMARY KEY,
+    a INTEGER NOT NULL,
+    b INTEGER NOT NULL,
+    result INTEGER NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+INSERT INTO kanari (a, b, result) VALUES
+    (12, 34, 408),
+    (56, 78, 4368),
+    (100, 200, 20000);
