@@ -1,0 +1,95 @@
+name: CI
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+    branches:
+      - main
+      - master
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      mariadb:
+        image: mariadb:latest
+        env:
+          MYSQL_DATABASE: kanari
+          MYSQL_USER: test_user
+          MYSQL_PASSWORD: test_password
+          MYSQL_ROOT_PASSWORD: root_password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -u test_user -ptest_password --silent"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+      minio:
+        image: minio/minio:latest
+        env:
+          MINIO_ACCESS_KEY: test-access-key
+          MINIO_SECRET_KEY: test-secret-key
+        ports:
+          - 9000:9000
+        options: >-
+          --health-cmd="curl -f http://localhost:9000/minio/health/ready || exit 1"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=3
+      postgres:
+        image: postgres:latest
+        env:
+          POSTGRES_DB: kanari
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U test_user"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    steps:
+      - uses: actions/checkout@v3
+      - name: Wait for MariaDB
+        run: |
+          for i in {1..30}; do
+            mysqladmin ping -h localhost -u test_user -ptest_password && break
+            echo "Waiting for MariaDB..." && sleep 2
+          done
+        env:
+          MYSQL_PWD: test_password
+      - name: Wait for MinIO
+        run: |
+          for i in {1..30}; do
+            curl -f http://localhost:9000/minio/health/ready && break
+            echo "Waiting for MinIO..." && sleep 2
+          done
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest boto3
+      - name: Run tests
+        env:
+          DB_HOST: localhost
+          DB_PORT: 3306
+          DB_NAME: kanari
+          DB_USER: test_user
+          DB_PASSWORD: test_password
+          S3_ACCESS_KEY: test-access-key
+          S3_SECRET_KEY: test-secret-key
+          S3_ENDPOINT: http://localhost:9000
+          PG_HOST: localhost
+          PG_PORT: 5432
+          PG_DATABASE: kanari
+          PG_USER: test_user
+          PG_PASSWORD: test_password
+        run: |
+          pytest -q
