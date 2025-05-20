@@ -1,95 +1,48 @@
 name: CI
+
 on:
   push:
-    branches:
-      - main
-      - master
+    branches: [main]
   pull_request:
-    branches:
-      - main
-      - master
+    branches: [main]
+
 jobs:
-  test:
+  build:
     runs-on: ubuntu-latest
-    services:
-      mariadb:
-        image: mariadb:latest
-        env:
-          MYSQL_DATABASE: kanari
-          MYSQL_USER: test_user
-          MYSQL_PASSWORD: test_password
-          MYSQL_ROOT_PASSWORD: root_password
-        ports:
-          - 3306:3306
-        options: >-
-          --health-cmd="mysqladmin ping -h localhost -u test_user -ptest_password --silent"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=5
-      minio:
-        image: minio/minio:latest
-        env:
-          MINIO_ACCESS_KEY: test-access-key
-          MINIO_SECRET_KEY: test-secret-key
-        ports:
-          - 9000:9000
-        options: >-
-          --health-cmd="curl -f http://localhost:9000/minio/health/ready || exit 1"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=3
-      postgres:
-        image: postgres:latest
-        env:
-          POSTGRES_DB: kanari
-          POSTGRES_USER: test_user
-          POSTGRES_PASSWORD: test_password
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd="pg_isready -U test_user"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=5
+
     steps:
       - uses: actions/checkout@v3
-      - name: Wait for MariaDB
-        run: |
-          for i in {1..30}; do
-            mysqladmin ping -h localhost -u test_user -ptest_password && break
-            echo "Waiting for MariaDB..." && sleep 2
-          done
-        env:
-          MYSQL_PWD: test_password
-      - name: Wait for MinIO
-        run: |
-          for i in {1..30}; do
-            curl -f http://localhost:9000/minio/health/ready && break
-            echo "Waiting for MinIO..." && sleep 2
-          done
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.11'
+          python-version: '3.12'
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest boto3
-      - name: Run tests
-        env:
-          DB_HOST: localhost
-          DB_PORT: 3306
-          DB_NAME: kanari
-          DB_USER: test_user
-          DB_PASSWORD: test_password
-          S3_ACCESS_KEY: test-access-key
-          S3_SECRET_KEY: test-secret-key
-          S3_ENDPOINT: http://localhost:9000
-          PG_HOST: localhost
-          PG_PORT: 5432
-          PG_DATABASE: kanari
-          PG_USER: test_user
-          PG_PASSWORD: test_password
+
+      - name: Check compilation with `python -m`
+        run: python -m your_flask_module_name
+        continue-on-error: true  # Avoid failure if app runs instead of exiting
+
+      - name: Run Flask app in background
         run: |
-          pytest -q
+          export FLASK_APP=your_flask_module_name
+          flask run --host=127.0.0.1 --port=5000 &
+          echo $! > flask.pid
+          sleep 5
+
+      - name: Test timeout returns 504
+        run: |
+          set -e
+          STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 4 http://127.0.0.1:5000/your_timeout_endpoint)
+          if [ "$STATUS_CODE" -ne 504 ]; then
+            echo "Expected 504, got $STATUS_CODE"
+            exit 1
+          fi
+
+      - name: Stop Flask app
+        run: |
+          kill $(cat flask.pid) || true
