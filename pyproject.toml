@@ -3,15 +3,14 @@ name = "kanari"
 version = "1.0.0"
 description = "Benchmark / status application"
 authors = [
-    {name = "Alexander F. Rødseth",email = "alerod@redpill-linpro.com"}
+    {name = "Alexander F. Rødseth",
+    email = "alerod@redpill-linpro.com"}
 ]
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "flask (>=3.1.0,<4.0.0)",
     "mariadb (>=1.1.12,<2.0.0)",
+    "psycopg2-binary (>=2.9.0,<3.0.0)",
+    "boto3 (==1.35.99)",
 ]
-
-[build-system]
-requires = ["poetry-core>=2.0.0,<3.0.0"]
-build-backend = "poetry.core.masonry.api"

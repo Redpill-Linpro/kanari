@@ -6,12 +6,18 @@ on:
   pull_request:
     branches: [main, ci]
 
+env:
+  NO_COLOR: "1"
+  PYTHONPYCACHEPREFIX: "/home/runner/.cache/python"
+  PYTHONUTF8: "1"
+
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -21,21 +27,21 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libmariadb-dev libpq-dev
+          sudo apt-get install -y libmariadb-dev libpq-dev curl
 
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Check compilation with `python -m`
-        run: python -m your_flask_module_name
-        continue-on-error: true  # Avoid failure if app runs instead of exiting
+      - name: Check Python compilation
+        run: |
+          find . -name "*.py" -exec python -m py_compile {} +
+        continue-on-error: true
 
       - name: Run Flask app in background
         run: |
-          export FLASK_APP=your_flask_module_name
-          flask run --host=127.0.0.1 --port=5000 &
+          python -m flask --app wsgi.py run --port=5000 &
           echo $! > flask.pid
           sleep 5
 
@@ -50,4 +56,6 @@ jobs:
 
       - name: Stop Flask app
         run: |
-          kill $(cat flask.pid) || true
+          if [ -f flask.pid ]; then
+            kill "$(cat flask.pid)" || true
+          fi
