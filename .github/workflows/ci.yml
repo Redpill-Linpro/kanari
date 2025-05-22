@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [main, ci]
+  pull_request:
+    branches: [main, ci]
+
+env:
+  NO_COLOR: "1"
+  PYTHONPYCACHEPREFIX: "/home/runner/.cache/python"
+  PYTHONUTF8: "1"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libmariadb-dev libpq-dev curl
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Check Python compilation
+        run: |
+          find . -name "*.py" -type f -exec python -m py_compile {} +
+        continue-on-error: true
+
+      - name: Run Flask app in background
+        run: |
+          python -m flask --app wsgi.py run --port=5000 &
+          echo $! > flask.pid
+          sleep 5
+
+      - name: Test timeout returns 504
+        run: |
+          set -e
+          STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 4 http://127.0.0.1:5000/)
+          if [ "$STATUS_CODE" -ne 504 ]; then
+            echo "Expected 504, got $STATUS_CODE"
+            exit 1
+          fi
+
+      - name: Stop Flask app
+        run: |
+          if [ -f flask.pid ]; then
+            kill "$(cat flask.pid)" || true
+          fi
