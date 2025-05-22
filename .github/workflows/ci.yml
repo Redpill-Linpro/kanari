@@ -36,7 +36,7 @@ jobs:
 
       - name: Check Python compilation
         run: |
-          find . -name "*.py" -exec python -m py_compile {} +
+          find . -name "*.py" -type f -exec python -m py_compile {} +
         continue-on-error: true
 
       - name: Run Flask app in background
@@ -48,7 +48,7 @@ jobs:
       - name: Test timeout returns 504
         run: |
           set -e
-          STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 4 http://127.0.0.1:5000/your_timeout_endpoint)
+          STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 4 http://127.0.0.1:5000/)
           if [ "$STATUS_CODE" -ne 504 ]; then
             echo "Expected 504, got $STATUS_CODE"
             exit 1
