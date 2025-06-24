@@ -194,6 +194,7 @@
         <button id="reconnect-btn" class="button">Refresh All Statistics</button>
 
         <div id="loading" class="loading hidden">Running tests...</div>
+        <div id="error-message" class="result invalid hidden"></div>
 
         <footer>Alexander F. Rødseth &lt;alerod@redpill-linpro.com&gt; for Redpill-Linpro, BSD-3 licensed</footer>
     </main>
@@ -201,8 +202,11 @@
     <script>
         document.getElementById('reconnect-btn').addEventListener('click', function() {
             const loadingEl = document.getElementById('loading');
+            const errorEl = document.getElementById('error-message');
+            const reconnectBtn = document.getElementById('reconnect-btn');
+            errorEl.classList.add('hidden');
             loadingEl.classList.remove('hidden');
-
+            reconnectBtn.disabled = true;
             fetch('/reconnect', {
                 method: 'POST',
                 headers: {
@@ -210,9 +214,16 @@
                 }
             })
             .then(response => {
+                loadingEl.classList.add('hidden');
+                reconnectBtn.disabled = false;
                 if (!response.ok) {
-                    loadingEl.classList.add('hidden');
-                    alert('Service request timed out. Please try again.');
+                    if (response.status === 504) {
+                        errorEl.textContent = 'Service request timed out. One or more services are not responding. Please check service status and try again.';
+                    } else {
+                        errorEl.textContent = `Request failed with status ${response.status}. Please try again.`;
+                    }
+                    errorEl.classList.remove('hidden');
+                    setTimeout(() => { errorEl.classList.add('hidden'); }, 10000);
                     return;
                 }
                 return response.json();
@@ -225,7 +236,10 @@
             .catch(error => {
                 console.error('Error:', error);
                 loadingEl.classList.add('hidden');
-                alert('Error refreshing statistics: ' + error.message);
+                reconnectBtn.disabled = false;
+                errorEl.textContent = 'Network error occurred. Please check your connection and try again.';
+                errorEl.classList.remove('hidden');
+                setTimeout(() => { errorEl.classList.add('hidden'); }, 10000);
             });
         });
     </script>
