@@ -13,7 +13,7 @@ import uuid
 
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
-versionString = "1.2.2"
+versionString = "1.3.0"
 
 logging.basicConfig(
     level=logging.INFO,
