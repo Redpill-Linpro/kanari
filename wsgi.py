@@ -15,6 +15,8 @@ import uuid
 
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
+versionString = "1.2.1"
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -37,6 +39,7 @@ mysql_host = os.getenv("DB_HOST")
 if mysql_host:
     try:
         import mariadb
+
         db_port = int(os.getenv("DB_PORT", 3306))
         db_database = os.getenv("DB_NAME", "kanari")
         db_table = os.getenv("DB_TABLE", "kanari")
@@ -52,6 +55,7 @@ if postgres_host:
     try:
         import psycopg2
         import psycopg2.extras
+
         pg_port = int(os.getenv("PG_PORT", 5432))
         pg_database = os.getenv("PG_DATABASE", "kanari")
         pg_table = os.getenv("PG_TABLE", "kanari")
@@ -334,13 +338,13 @@ def index():
     template_start = time.time()
 
     # Render the template here, just to measure the performance
-    response = render_template("index.html", metrics=metrics)
+    response = render_template("index.html", metrics=metrics, version=versionString)
 
     metrics["template_read_time"] = round((time.time() - template_start) * 1000, 2)
     metrics["total_time"] = round((time.time() - start_time) * 1000, 2)
 
     # Fill in the newly recorded metrics before returning
-    return render_template("index.html", metrics=metrics)
+    return render_template("index.html", metrics=metrics, version=versionString)
 
 
 @app.route("/reconnect", methods=["POST"])
@@ -363,7 +367,7 @@ def reconnect():
     metrics = {**mysql_metrics, **pg_metrics, **s3_metrics}
 
     template_start = time.time()
-    render_template("index.html", metrics=metrics)
+    render_template("index.html", metrics=metrics, version=versionString)
     metrics["template_read_time"] = round((time.time() - template_start) * 1000, 2)
 
     metrics["total_time"] = round((time.time() - start_time) * 1000, 2)
