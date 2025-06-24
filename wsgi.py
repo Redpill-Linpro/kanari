@@ -39,7 +39,7 @@ if mysql_host:
 
         db_port = int(os.getenv("DB_PORT", 3306))
         db_database = os.getenv("DB_NAME", "kanari")
-        db_table = os.getenv("DB_TABLE", "kanari")
+        db_table = os.getenv("DB_TABLE", db_database)
         db_user = os.getenv("DB_USER", "alexander")
         db_password = os.getenv("DB_PASSWORD", "")
     except ImportError:
@@ -55,7 +55,7 @@ if postgres_host:
 
         pg_port = int(os.getenv("PG_PORT", 5432))
         pg_database = os.getenv("PG_DATABASE", "kanari")
-        pg_table = os.getenv("PG_TABLE", "kanari")
+        pg_table = os.getenv("PG_TABLE", pg_database)
         pg_user = os.getenv("PG_USER", "alexander")
         pg_password = os.getenv("PG_PASSWORD", "")
     except ImportError:
