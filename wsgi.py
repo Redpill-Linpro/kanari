@@ -15,7 +15,7 @@ import uuid
 
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
-versionString = "1.2.1"
+versionString = "1.2.2"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -102,9 +102,6 @@ def db_connect(max_retries=5, retry_delay=2):
 
 def collect_db_stats():
     """Connect to MariaDB/MySQL database and collect statistics"""
-    if not mysql_host:
-        return {"mysql_disabled": "MariaDB/MySQL not configured (DB_HOST not set)"}
-
     metrics = {}
 
     conn_start = time.time()
@@ -162,9 +159,6 @@ def collect_db_stats():
 ## PostgreSQL stats collection
 def collect_pg_stats():
     """Collect PostgreSQL database statistics"""
-    if not postgres_host:
-        return {"postgres_disabled": "PostgreSQL not configured (PG_HOST not set)"}
-
     metrics = {}
     conn_start = time.time()
     conn = None
@@ -219,9 +213,6 @@ def collect_pg_stats():
 def collect_s3_stats():
     """Collect S3 storage statistics"""
     metrics = {}
-
-    if not s3_access_key or not s3_secret_key:
-        return {"s3_error": "S3 credentials not configured"}
 
     temp_file_path = None
     download_path = None
@@ -315,23 +306,67 @@ def index():
     logger.info("Processing index request")
 
     # Run service tests with timeout
-    mysql_future = executor.submit(collect_db_stats)
-    pg_future = executor.submit(collect_pg_stats)
-    s3_future = executor.submit(collect_s3_stats)
-    try:
-        mysql_metrics = mysql_future.result(timeout=TIMEOUT_SECONDS)
-        pg_metrics = pg_future.result(timeout=TIMEOUT_SECONDS)
-        s3_metrics = s3_future.result(timeout=TIMEOUT_SECONDS)
-    except TimeoutError:
-        logger.error("Timeout waiting for service tests")
-        return (
-            render_template(
-                "error.html",
-                error_title="504 Gateway Timeout",
-                error_message="Service request timed out",
-            ),
-            504,
-        )
+    mysql_metrics = {}
+    pg_metrics = {}
+    s3_metrics = {}
+
+    # MySQL/MariaDB test
+    if mysql_host:
+        mysql_future = executor.submit(collect_db_stats)
+        try:
+            mysql_metrics = mysql_future.result(timeout=TIMEOUT_SECONDS)
+        except TimeoutError:
+            logger.error("Timeout waiting for MySQL/MariaDB service test")
+            return (
+                render_template(
+                    "error.html",
+                    error_title="504 Gateway Timeout",
+                    error_message="MySQL/MariaDB service request timed out",
+                ),
+                504,
+            )
+    else:
+        mysql_metrics = {
+            "mysql_disabled": "MariaDB/MySQL not configured (DB_HOST not set)"
+        }
+
+    # PostgreSQL test
+    if postgres_host:
+        pg_future = executor.submit(collect_pg_stats)
+        try:
+            pg_metrics = pg_future.result(timeout=TIMEOUT_SECONDS)
+        except TimeoutError:
+            logger.error("Timeout waiting for PostgreSQL service test")
+            return (
+                render_template(
+                    "error.html",
+                    error_title="504 Gateway Timeout",
+                    error_message="PostgreSQL service request timed out",
+                ),
+                504,
+            )
+    else:
+        pg_metrics = {
+            "postgres_disabled": "PostgreSQL not configured (PG_HOST not set)"
+        }
+
+    # S3 test
+    if s3_access_key and s3_secret_key:
+        s3_future = executor.submit(collect_s3_stats)
+        try:
+            s3_metrics = s3_future.result(timeout=TIMEOUT_SECONDS)
+        except TimeoutError:
+            logger.error("Timeout waiting for S3 service test")
+            return (
+                render_template(
+                    "error.html",
+                    error_title="504 Gateway Timeout",
+                    error_message="S3 service request timed out",
+                ),
+                504,
+            )
+    else:
+        s3_metrics = {"s3_error": "S3 credentials not configured"}
 
     metrics = {**mysql_metrics, **pg_metrics, **s3_metrics}
 
