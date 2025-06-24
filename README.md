@@ -21,7 +21,7 @@ Of the previous version, before PostgreSQL support was added:
 - `DB_NAME` – Database name
 - `DB_USER` – Username
 - `DB_PASSWORD` – Password
-- `DB_TABLE` – Database table (optional, defaults to `DB_NAME`)
+- `DB_TABLE` – Database table (optional, defaults to the database name)
 
 #### PostgreSQL
 
@@ -30,16 +30,17 @@ Of the previous version, before PostgreSQL support was added:
 - `PG_DATABASE` – Database name
 - `PG_USER` – Username
 - `PG_PASSWORD` – Password
-- `PG_TABLE` – Database table (optional, defaults to `PG_DATABASE`)
+- `PG_TABLE` – Database table (optional, defaults to the database name)
 
 #### S3
 
+- `S3_ENDPOINT` – Custom S3 endpoint URL
 - `S3_ACCESS_KEY` – S3 access key
 - `S3_SECRET_KEY` – S3 secret key
-- `S3_ENDPOINT` – Custom S3 endpoint URL
-- `S3_BUCKET` – S3 bucket to use for performance tests
+- `S3_BUCKET` – S3 bucket to use
 
 #### HTTP / App
+
 - `HOST` – Host to bind the Flask server (default: `0.0.0.0`)
 - `PORT` – Port to bind the Flask server (default: `5000`)
 
