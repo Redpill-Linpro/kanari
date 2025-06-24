@@ -1,6 +1,6 @@
 FROM python:3-alpine
 
-RUN apk add --no-cache gcc mariadb-client mariadb-connector-c mariadb-dev musl-dev
+RUN apk add --no-cache gcc mariadb-client mariadb-connector-c mariadb-dev musl-dev postgresql-dev
 
 RUN mkdir -p /app/kanari
 WORKDIR /app/kanari
