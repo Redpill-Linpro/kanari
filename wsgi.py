@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-from botocore.exceptions import ClientError
 from flask import Flask, render_template, jsonify
 
-import boto3
 import logging
 import os
 import statistics
@@ -65,11 +63,19 @@ if postgres_host:
         logger.warning("PostgreSQL support is not available (missing psycopg2).")
         postgres_host = None
 
-# S3 buckets
-s3_access_key = os.getenv("S3_ACCESS_KEY", "")
-s3_secret_key = os.getenv("S3_SECRET_KEY", "")
-s3_endpoint = os.getenv("S3_ENDPOINT", "https://situla.bitbit.net")
-s3_bucket = os.getenv("S3_BUCKET", "redpill-linpro-kanari")
+# S3 storage
+s3_endpoint = os.getenv("S3_ENDPOINT", "")  # https://situla.bitbit.net
+if s3_endpoint:
+    try:
+        import boto3
+        from botocore.exceptions import ClientError
+
+        s3_access_key = os.getenv("S3_ACCESS_KEY", "")
+        s3_secret_key = os.getenv("S3_SECRET_KEY", "")
+        s3_bucket = os.getenv("S3_BUCKET", "redpill-linpro-kanari")
+    except ImportError:
+        logger.warning("S3 support is not available (missing boto3).")
+        s3_endpoint = None
 
 
 def db_connect(max_retries=5, retry_delay=2):
@@ -351,7 +357,7 @@ def index():
         }
 
     # S3 test
-    if s3_access_key and s3_secret_key:
+    if s3_endpoint:
         s3_future = executor.submit(collect_s3_stats)
         try:
             s3_metrics = s3_future.result(timeout=TIMEOUT_SECONDS)
@@ -366,7 +372,7 @@ def index():
                 504,
             )
     else:
-        s3_metrics = {"s3_error": "S3 credentials not configured"}
+        s3_metrics = {"s3_disabled": "S3 not configured (S3_ENDPOINT not set)"}
 
     metrics = {**mysql_metrics, **pg_metrics, **s3_metrics}
 
@@ -388,13 +394,26 @@ def reconnect():
     logger.info("Processing reconnect request")
 
     # Run service tests with timeout
-    mysql_future = executor.submit(collect_db_stats)
-    pg_future = executor.submit(collect_pg_stats)
-    s3_future = executor.submit(collect_s3_stats)
+    mysql_future = executor.submit(collect_db_stats) if mysql_host else None
+    pg_future = executor.submit(collect_pg_stats) if postgres_host else None
+    s3_future = executor.submit(collect_s3_stats) if s3_endpoint else None
+
     try:
-        mysql_metrics = mysql_future.result(timeout=TIMEOUT_SECONDS)
-        pg_metrics = pg_future.result(timeout=TIMEOUT_SECONDS)
-        s3_metrics = s3_future.result(timeout=TIMEOUT_SECONDS)
+        mysql_metrics = (
+            mysql_future.result(timeout=TIMEOUT_SECONDS)
+            if mysql_future
+            else {"mysql_disabled": "MariaDB/MySQL not configured (DB_HOST not set)"}
+        )
+        pg_metrics = (
+            pg_future.result(timeout=TIMEOUT_SECONDS)
+            if pg_future
+            else {"postgres_disabled": "PostgreSQL not configured (PG_HOST not set)"}
+        )
+        s3_metrics = (
+            s3_future.result(timeout=TIMEOUT_SECONDS)
+            if s3_future
+            else {"s3_disabled": "S3 not configured (S3_ENDPOINT not set)"}
+        )
     except TimeoutError:
         logger.error("Timeout waiting for service tests")
         return jsonify({"error": "Service request timed out"}), 504
@@ -419,4 +438,5 @@ if __name__ == "__main__":
     logger.info(f"Starting Flask application on {http_host}:{http_port}")
     logger.info(f"MariaDB/MySQL enabled: {mysql_host is not None}")
     logger.info(f"PostgreSQL enabled: {postgres_host is not None}")
+    logger.info(f"S3 enabled: {s3_endpoint is not None}")
     app.run(host=http_host, port=http_port)
