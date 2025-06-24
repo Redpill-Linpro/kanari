@@ -6,7 +6,6 @@ from flask import Flask, render_template, jsonify
 
 import boto3
 import logging
-import mariadb
 import os
 import statistics
 import sys
@@ -23,13 +22,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-try:
-    import psycopg2
-    import psycopg2.extras
-except ImportError:
-    psycopg2 = None
-    logger.warning("PostgreSQL support is not available (missing psycopg2).")
-
 app = Flask(__name__)
 
 # Executor for background service tests
@@ -40,21 +32,36 @@ TIMEOUT_SECONDS = 3
 http_host = os.getenv("HOST", "0.0.0.0")
 http_port = int(os.getenv("PORT", 5000))
 
-db_host = os.getenv("DB_HOST", "localhost")
-db_port = int(os.getenv("DB_PORT", 3306))
-db_database = os.getenv("DB_NAME", "kanari")
-db_table = os.getenv("DB_TABLE", "kanari")
-db_user = os.getenv("DB_USER", "alexander")
-db_password = os.getenv("DB_PASSWORD", "")
+# MySQL / MariaDB
+mysql_host = os.getenv("DB_HOST")
+if mysql_host:
+    try:
+        import mariadb
+        db_port = int(os.getenv("DB_PORT", 3306))
+        db_database = os.getenv("DB_NAME", "kanari")
+        db_table = os.getenv("DB_TABLE", "kanari")
+        db_user = os.getenv("DB_USER", "alexander")
+        db_password = os.getenv("DB_PASSWORD", "")
+    except ImportError:
+        logger.warning("MariaDB/MySQL support is not available (missing mariadb).")
+        mysql_host = None
 
-# PostgreSQL configuration (optional, if provided)
-pg_host = os.getenv("PG_HOST", db_host)
-pg_port = int(os.getenv("PG_PORT", 5432))
-pg_database = os.getenv("PG_DATABASE", db_database)
-pg_table = os.getenv("PG_TABLE", db_table)
-pg_user = os.getenv("PG_USER", db_user)
-pg_password = os.getenv("PG_PASSWORD", db_password)
+# PostgreSQL
+postgres_host = os.getenv("PG_HOST")
+if postgres_host:
+    try:
+        import psycopg2
+        import psycopg2.extras
+        pg_port = int(os.getenv("PG_PORT", 5432))
+        pg_database = os.getenv("PG_DATABASE", "kanari")
+        pg_table = os.getenv("PG_TABLE", "kanari")
+        pg_user = os.getenv("PG_USER", "alexander")
+        pg_password = os.getenv("PG_PASSWORD", "")
+    except ImportError:
+        logger.warning("PostgreSQL support is not available (missing psycopg2).")
+        postgres_host = None
 
+# S3 buckets
 s3_access_key = os.getenv("S3_ACCESS_KEY", "")
 s3_secret_key = os.getenv("S3_SECRET_KEY", "")
 s3_endpoint = os.getenv("S3_ENDPOINT", "https://situla.bitbit.net")
@@ -67,10 +74,10 @@ def db_connect(max_retries=5, retry_delay=2):
     while retries < max_retries:
         try:
             logger.info(
-                f"Connecting to database {db_database} on {db_host}:{db_port} (attempt {retries+1}/{max_retries})"
+                f"Connecting to database {db_database} on {mysql_host}:{db_port} (attempt {retries+1}/{max_retries})"
             )
             return mariadb.connect(
-                host=db_host,
+                host=mysql_host,
                 user=db_user,
                 password=db_password,
                 database=db_database,
@@ -91,6 +98,9 @@ def db_connect(max_retries=5, retry_delay=2):
 
 def collect_db_stats():
     """Connect to MariaDB/MySQL database and collect statistics"""
+    if not mysql_host:
+        return {"mysql_disabled": "MariaDB/MySQL not configured (DB_HOST not set)"}
+
     metrics = {}
 
     conn_start = time.time()
@@ -148,12 +158,15 @@ def collect_db_stats():
 ## PostgreSQL stats collection
 def collect_pg_stats():
     """Collect PostgreSQL database statistics"""
+    if not postgres_host:
+        return {"postgres_disabled": "PostgreSQL not configured (PG_HOST not set)"}
+
     metrics = {}
     conn_start = time.time()
     conn = None
     try:
         conn = psycopg2.connect(
-            host=pg_host,
+            host=postgres_host,
             user=pg_user,
             password=pg_password,
             dbname=pg_database,
@@ -365,4 +378,6 @@ def favicon():
 
 if __name__ == "__main__":
     logger.info(f"Starting Flask application on {http_host}:{http_port}")
+    logger.info(f"MariaDB/MySQL enabled: {mysql_host is not None}")
+    logger.info(f"PostgreSQL enabled: {postgres_host is not None}")
     app.run(host=http_host, port=http_port)

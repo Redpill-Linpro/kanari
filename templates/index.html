@@ -18,6 +18,9 @@
         {% endif %}
 
         <h2>MariaDB/MySQL Stats</h2>
+        {% if metrics.mysql_disabled %}
+        <p class="info-text">{{ metrics.mysql_disabled }}</p>
+        {% else %}
         <table class="metrics-table">
             <thead>
                 <tr>
@@ -30,7 +33,12 @@
                     <td>MariaDB/MySQL connection</td>
                     <td id="mysql-connect-time">{{ metrics.mysql_connect_time }}</td>
                 </tr>
-                {% if not metrics.mysql_error %}
+                {% if metrics.mysql_error %}
+                <tr class="error-row">
+                    <td>Error</td>
+                    <td id="mysql-error">{{ metrics.mysql_error }}</td>
+                </tr>
+                {% else %}
                 <tr>
                     <td>Initial data fetch</td>
                     <td id="mysql-first-fetch-time">{{ metrics.mysql_first_fetch_time }}</td>
@@ -54,8 +62,12 @@
                 {% endif %}
             </tbody>
         </table>
+        {% endif %}
 
         <h2>PostgreSQL Stats</h2>
+        {% if metrics.postgres_disabled %}
+        <p class="info-text">{{ metrics.postgres_disabled }}</p>
+        {% else %}
         <table class="metrics-table">
             <thead>
                 <tr>
@@ -64,17 +76,16 @@
                 </tr>
             </thead>
             <tbody>
+                <tr>
+                    <td>PostgreSQL connection</td>
+                    <td id="postgres-connect-time">{{ metrics.postgres_connect_time }}</td>
+                </tr>
                 {% if metrics.postgres_error %}
                 <tr class="error-row">
                     <td>Error</td>
                     <td id="postgres-error">{{ metrics.postgres_error }}</td>
                 </tr>
-                {% endif %}
-                <tr>
-                    <td>PostgreSQL connection</td>
-                    <td id="postgres-connect-time">{{ metrics.postgres_connect_time }}</td>
-                </tr>
-                {% if not metrics.postgres_error %}
+                {% else %}
                 <tr>
                     <td>Initial data fetch</td>
                     <td id="postgres-first-fetch-time">{{ metrics.postgres_first_fetch_time }}</td>
@@ -98,6 +109,7 @@
                 {% endif %}
             </tbody>
         </table>
+        {% endif %}
 
         <h2>S3 Stats</h2>
         <table class="metrics-table">
