@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-from flask import Flask, render_template, jsonify
+from flask import Flask, render_template, jsonify, Response
 
 import logging
 import os
@@ -12,8 +12,9 @@ import time
 import uuid
 
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
+from typing import Dict, Any, Tuple, Optional, Callable, Union
 
-versionString = "1.3.0"
+VERSION = "1.3.0"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -24,9 +25,7 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-# Executor for background service tests
 executor = ThreadPoolExecutor(max_workers=4)
-# Timeout for service tests in seconds
 TIMEOUT_SECONDS = 3
 
 http_host = os.getenv("HOST", "0.0.0.0")
@@ -64,7 +63,7 @@ if postgres_host:
         postgres_host = None
 
 # S3 storage
-s3_endpoint = os.getenv("S3_ENDPOINT", "")  # https://situla.bitbit.net
+s3_endpoint = os.getenv("S3_ENDPOINT", "")
 if s3_endpoint:
     try:
         import boto3
@@ -78,13 +77,35 @@ if s3_endpoint:
         s3_endpoint = None
 
 
-def db_connect(max_retries=5, retry_delay=2):
+def time_operation(
+    operation_func: Callable[[], Any],
+) -> Callable[[], Tuple[Any, float]]:
+    """Decorator to time operations and return result with elapsed time."""
+
+    def wrapper(*args, **kwargs) -> Tuple[Any, float]:
+        start = time.time()
+        result = operation_func(*args, **kwargs)
+        elapsed_ms = round((time.time() - start) * 1000, 2)
+        return result, elapsed_ms
+
+    return wrapper
+
+
+def safe_connection_close(conn: Any) -> None:
+    """Safely close a database connection."""
+    if conn:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def db_connect(max_retries: int = 5, retry_delay: int = 2) -> Optional[Any]:
     """Try reconnecting to the MariaDB/MySQL database if the initial connection fails."""
-    retries = 0
-    while retries < max_retries:
+    for attempt in range(max_retries):
         try:
             logger.info(
-                f"Connecting to database {db_database} on {mysql_host}:{db_port} (attempt {retries+1}/{max_retries})"
+                f"Connecting to database {db_database} on {mysql_host}:{db_port} (attempt {attempt+1}/{max_retries})"
             )
             return mariadb.connect(
                 host=mysql_host,
@@ -94,9 +115,8 @@ def db_connect(max_retries=5, retry_delay=2):
                 port=db_port,
             )
         except mariadb.Error as e:
-            logger.warning(f"Database connection attempt {retries+1} failed: {e}")
-            retries += 1
-            if retries < max_retries:
+            logger.warning(f"Database connection attempt {attempt+1} failed: {e}")
+            if attempt < max_retries - 1:
                 logger.info(f"Retrying in {retry_delay} seconds...")
                 time.sleep(retry_delay)
             else:
@@ -106,181 +126,218 @@ def db_connect(max_retries=5, retry_delay=2):
                 return None
 
 
-def collect_db_stats():
+def measure_fetch_performance(
+    cursor: Any, query: str, iterations: int = 10
+) -> Dict[str, float]:
+    """Measure database fetch performance over multiple iterations."""
+    fetch_times = []
+    for _ in range(iterations):
+        start = time.time()
+        cursor.execute(query)
+        cursor.fetchone()
+        fetch_times.append((time.time() - start) * 1000)
+
+    return {
+        "worst": round(max(fetch_times), 2),
+        "best": round(min(fetch_times), 2),
+        "avg": round(statistics.mean(fetch_times), 2),
+    }
+
+
+def collect_db_stats() -> Dict[str, Any]:
     """Connect to MariaDB/MySQL database and collect statistics"""
-    metrics = {}
-
-    conn_start = time.time()
-    conn = db_connect()
-    conn_time = (time.time() - conn_start) * 1000
-    metrics["mysql_connect_time"] = round(conn_time, 2)
-
-    if not conn:
-        return {
-            "mysql_error": "Could not connect to MariaDB/MySQL. Check configuration.",
-            "mysql_connect_time": metrics["mysql_connect_time"],
-        }
+    metrics: Dict[str, Any] = {}
+    conn = None
 
     try:
+        conn, connect_time = time_operation(db_connect)()
+        metrics["mysql_connect_time"] = connect_time
+
+        if not conn:
+            return {
+                "mysql_error": "Could not connect to MariaDB/MySQL. Check configuration.",
+                "mysql_connect_time": metrics["mysql_connect_time"],
+            }
+
         cur = conn.cursor(dictionary=True)
         query = f"SELECT * FROM {db_table} ORDER BY (SELECT NULL) DESC LIMIT 1"
 
-        first_fetch_start = time.time()
-        cur.execute(query)
-        row = cur.fetchone()
-        metrics["mysql_first_fetch_time"] = round(
-            (time.time() - first_fetch_start) * 1000, 2
+        # First fetch timing
+        def first_fetch() -> Any:
+            cur.execute(query)
+            return cur.fetchone()
+
+        _, first_fetch_time = time_operation(first_fetch)()
+        metrics["mysql_first_fetch_time"] = first_fetch_time
+
+        # Performance measurements
+        perf = measure_fetch_performance(cur, query)
+        metrics.update(
+            {
+                "mysql_fetch_worst": perf["worst"],
+                "mysql_fetch_best": perf["best"],
+                "mysql_fetch_avg": perf["avg"],
+            }
         )
 
-        fetch_times = []
-        for _ in range(10):
-            fetch_start = time.time()
-            cur.execute(query)
-            cur.fetchone()
-            fetch_times.append((time.time() - fetch_start) * 1000)
+        def close_connections() -> None:
+            cur.close()
+            conn.close()
 
-        metrics["mysql_fetch_worst"] = round(max(fetch_times), 2)
-        metrics["mysql_fetch_best"] = round(min(fetch_times), 2)
-        metrics["mysql_fetch_avg"] = round(statistics.mean(fetch_times), 2)
-
-        close_start = time.time()
-        cur.close()
-        conn.close()
-        metrics["mysql_close_time"] = round((time.time() - close_start) * 1000, 2)
+        _, close_time = time_operation(close_connections)()
+        metrics["mysql_close_time"] = close_time
+        conn = None
 
         return metrics
 
     except Exception as e:
-        if conn:
-            try:
-                conn.close()
-            except:
-                pass
+        safe_connection_close(conn)
         return {
             "mysql_error": str(e),
             "mysql_connect_time": metrics.get("mysql_connect_time", 0),
         }
 
 
-## PostgreSQL stats collection
-def collect_pg_stats():
+def collect_pg_stats() -> Dict[str, Any]:
     """Collect PostgreSQL database statistics"""
-    metrics = {}
-    conn_start = time.time()
+    metrics: Dict[str, Any] = {}
     conn = None
+
     try:
-        conn = psycopg2.connect(
-            host=postgres_host,
-            user=pg_user,
-            password=pg_password,
-            dbname=pg_database,
-            port=pg_port,
-        )
-        metrics["postgres_connect_time"] = round((time.time() - conn_start) * 1000, 2)
+
+        def connect_pg() -> Any:
+            return psycopg2.connect(
+                host=postgres_host,
+                user=pg_user,
+                password=pg_password,
+                dbname=pg_database,
+                port=pg_port,
+            )
+
+        conn, connect_time = time_operation(connect_pg)()
+        metrics["postgres_connect_time"] = connect_time
 
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         query = f"SELECT * FROM {pg_table} ORDER BY (SELECT NULL) DESC LIMIT 1"
 
-        first_fetch_start = time.time()
-        cur.execute(query)
-        cur.fetchone()
-        metrics["postgres_first_fetch_time"] = round(
-            (time.time() - first_fetch_start) * 1000, 2
+        # First fetch timing
+        def first_fetch() -> Any:
+            cur.execute(query)
+            return cur.fetchone()
+
+        _, first_fetch_time = time_operation(first_fetch)()
+        metrics["postgres_first_fetch_time"] = first_fetch_time
+
+        # Performance measurements
+        perf = measure_fetch_performance(cur, query)
+        metrics.update(
+            {
+                "postgres_fetch_worst": perf["worst"],
+                "postgres_fetch_best": perf["best"],
+                "postgres_fetch_avg": perf["avg"],
+            }
         )
 
-        fetch_times = []
-        for _ in range(10):
-            fetch_start = time.time()
-            cur.execute(query)
-            cur.fetchone()
-            fetch_times.append((time.time() - fetch_start) * 1000)
+        def close_connections() -> None:
+            cur.close()
+            conn.close()
 
-        metrics["postgres_fetch_worst"] = round(max(fetch_times), 2)
-        metrics["postgres_fetch_best"] = round(min(fetch_times), 2)
-        metrics["postgres_fetch_avg"] = round(statistics.mean(fetch_times), 2)
+        _, close_time = time_operation(close_connections)()
+        metrics["postgres_close_time"] = close_time
+        conn = None
 
-        close_start = time.time()
-        cur.close()
-        conn.close()
-        metrics["postgres_close_time"] = round((time.time() - close_start) * 1000, 2)
         return metrics
+
     except Exception as e:
-        if conn:
-            try:
-                conn.close()
-            except:
-                pass
+        safe_connection_close(conn)
         return {
             "postgres_error": str(e),
             "postgres_connect_time": metrics.get("postgres_connect_time", 0),
         }
 
 
-def collect_s3_stats():
-    """Collect S3 storage statistics"""
-    metrics = {}
+def cleanup_temp_files(*file_paths: str) -> None:
+    """Clean up temporary files."""
+    for path in file_paths:
+        if path and os.path.exists(path):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
 
-    temp_file_path = None
-    download_path = None
+
+def collect_s3_stats() -> Dict[str, Any]:
+    """Collect S3 storage statistics"""
+    metrics: Dict[str, Any] = {}
+    temp_file_path: Optional[str] = None
+    download_path: Optional[str] = None
 
     try:
-        # Use existing bucket name from configuration
         test_bucket_name = s3_bucket
-        # Timestamp for test object key generation
-        timestamp = int(time.time())
-
-        s3_client_start = time.time()
-        s3_client = boto3.client(
-            "s3",
-            aws_access_key_id=s3_access_key,
-            aws_secret_access_key=s3_secret_key,
-            endpoint_url=s3_endpoint,
-        )
-        metrics["s3_client_init_time"] = round(
-            (time.time() - s3_client_start) * 1000, 2
-        )
-
+        test_key = f"stats-test-{int(time.time())}.txt"
         test_data = b"This is a test file for S3 performance testing."
-        test_key = f"stats-test-{timestamp}.txt"
 
+        # Initialize S3 client
+        def init_s3_client() -> Any:
+            return boto3.client(
+                "s3",
+                aws_access_key_id=s3_access_key,
+                aws_secret_access_key=s3_secret_key,
+                endpoint_url=s3_endpoint,
+            )
+
+        s3_client, client_init_time = time_operation(init_s3_client)()
+        metrics["s3_client_init_time"] = client_init_time
+
+        # Create test file
         with tempfile.NamedTemporaryFile(delete=False) as temp_file:
             temp_file.write(test_data)
             temp_file_path = temp_file.name
 
         download_path = f"{temp_file_path}.download"
 
-        put_start = time.time()
-        s3_client.upload_file(temp_file_path, test_bucket_name, test_key)
-        metrics["s3_put_time"] = round((time.time() - put_start) * 1000, 2)
+        # Upload timing
+        def upload_file() -> None:
+            return s3_client.upload_file(temp_file_path, test_bucket_name, test_key)
+
+        _, put_time = time_operation(upload_file)()
+        metrics["s3_put_time"] = put_time
         logger.info(f"Successfully uploaded test object to bucket {test_bucket_name}")
 
+        # Download performance measurements
         get_times = []
         for _ in range(5):
-            get_start = time.time()
             try:
-                s3_client.download_file(test_bucket_name, test_key, download_path)
-                get_times.append((time.time() - get_start) * 1000)
+
+                def download_file() -> None:
+                    return s3_client.download_file(
+                        test_bucket_name, test_key, download_path
+                    )
+
+                _, get_time = time_operation(download_file)()
+                get_times.append(get_time)
             except Exception as e:
                 logger.error(f"Error downloading test file: {e}")
-                get_times.append(0)
 
-        if get_times and max(get_times) > 0:
-            metrics["s3_get_worst"] = round(max(get_times), 2)
-            metrics["s3_get_best"] = round(min(filter(lambda x: x > 0, get_times)), 2)
-            valid_times = [t for t in get_times if t > 0]
-            if valid_times:
-                metrics["s3_get_avg"] = round(statistics.mean(valid_times), 2)
-            else:
-                metrics["s3_get_error"] = "All get operations failed"
-        else:
-            metrics["s3_get_error"] = "No successful get operations"
-
-        delete_file_start = time.time()
-        try:
-            s3_client.delete_object(Bucket=test_bucket_name, Key=test_key)
-            metrics["s3_delete_file_time"] = round(
-                (time.time() - delete_file_start) * 1000, 2
+        if get_times:
+            metrics.update(
+                {
+                    "s3_get_worst": round(max(get_times), 2),
+                    "s3_get_best": round(min(get_times), 2),
+                    "s3_get_avg": round(statistics.mean(get_times), 2),
+                }
             )
+        else:
+            metrics["s3_get_error"] = "All get operations failed"
+
+        # Cleanup test file
+        try:
+
+            def delete_object() -> Any:
+                return s3_client.delete_object(Bucket=test_bucket_name, Key=test_key)
+
+            _, delete_time = time_operation(delete_object)()
+            metrics["s3_delete_file_time"] = delete_time
         except Exception as e:
             logger.error(f"Error deleting test file: {e}")
             metrics["s3_delete_file_error"] = str(e)
@@ -300,137 +357,104 @@ def collect_s3_stats():
             "s3_client_init_time": metrics.get("s3_client_init_time", 0),
         }
     finally:
-        if temp_file_path and os.path.exists(temp_file_path):
-            os.remove(temp_file_path)
-        if download_path and os.path.exists(download_path):
-            os.remove(download_path)
+        cleanup_temp_files(temp_file_path, download_path)
+
+
+def execute_service_test(
+    service_name: str, test_func: Callable[[], Dict[str, Any]], host_var: Optional[str]
+) -> Dict[str, Any]:
+    """Execute a service test with timeout handling."""
+    if not host_var:
+        return {f"{service_name}_disabled": f"{service_name.title()} not configured"}
+
+    future = executor.submit(test_func)
+    try:
+        result = future.result(timeout=TIMEOUT_SECONDS)
+        # Check if the result contains an error that should trigger 504
+        error_keys = [
+            f"{service_name}_error",
+            "postgres_error",
+            "mysql_error",
+            "s3_error",
+        ]
+        if any(key in result for key in error_keys):
+            error_msg = f"{service_name.title()} service failed"
+            logger.error(f"Service failure detected for {service_name}")
+            return {"timeout_error": error_msg}
+        return result
+    except TimeoutError:
+        error_msg = f"{service_name.title()} service request timed out"
+        logger.error(f"Timeout waiting for {service_name} service test")
+        return {"timeout_error": error_msg}
+
+
+def collect_all_metrics() -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """Collect metrics from all configured services."""
+    service_configs = [
+        ("mysql", collect_db_stats, mysql_host),
+        ("postgres", collect_pg_stats, postgres_host),
+        ("s3", collect_s3_stats, s3_endpoint),
+    ]
+
+    metrics: Dict[str, Any] = {}
+    for service_name, test_func, host_var in service_configs:
+        result = execute_service_test(service_name, test_func, host_var)
+        if "timeout_error" in result:
+            return None, result["timeout_error"]
+        metrics.update(result)
+
+    return metrics, None
 
 
 @app.route("/")
-def index():
+def index() -> Union[str, Tuple[str, int]]:
     start_time = time.time()
     logger.info("Processing index request")
 
-    # Run service tests with timeout
-    mysql_metrics = {}
-    pg_metrics = {}
-    s3_metrics = {}
+    metrics, timeout_error = collect_all_metrics()
+    if timeout_error:
+        return (
+            render_template(
+                "error.html",
+                error_title="504 Gateway Timeout",
+                error_message=timeout_error,
+            ),
+            504,
+        )
 
-    # MySQL/MariaDB test
-    if mysql_host:
-        mysql_future = executor.submit(collect_db_stats)
-        try:
-            mysql_metrics = mysql_future.result(timeout=TIMEOUT_SECONDS)
-        except TimeoutError:
-            logger.error("Timeout waiting for MySQL/MariaDB service test")
-            return (
-                render_template(
-                    "error.html",
-                    error_title="504 Gateway Timeout",
-                    error_message="MySQL/MariaDB service request timed out",
-                ),
-                504,
-            )
-    else:
-        mysql_metrics = {
-            "mysql_disabled": "MariaDB/MySQL not configured (DB_HOST not set)"
-        }
+    # Template rendering performance
+    def render_page() -> str:
+        return render_template("index.html", metrics=metrics, version=VERSION)
 
-    # PostgreSQL test
-    if postgres_host:
-        pg_future = executor.submit(collect_pg_stats)
-        try:
-            pg_metrics = pg_future.result(timeout=TIMEOUT_SECONDS)
-        except TimeoutError:
-            logger.error("Timeout waiting for PostgreSQL service test")
-            return (
-                render_template(
-                    "error.html",
-                    error_title="504 Gateway Timeout",
-                    error_message="PostgreSQL service request timed out",
-                ),
-                504,
-            )
-    else:
-        pg_metrics = {
-            "postgres_disabled": "PostgreSQL not configured (PG_HOST not set)"
-        }
-
-    # S3 test
-    if s3_endpoint:
-        s3_future = executor.submit(collect_s3_stats)
-        try:
-            s3_metrics = s3_future.result(timeout=TIMEOUT_SECONDS)
-        except TimeoutError:
-            logger.error("Timeout waiting for S3 service test")
-            return (
-                render_template(
-                    "error.html",
-                    error_title="504 Gateway Timeout",
-                    error_message="S3 service request timed out",
-                ),
-                504,
-            )
-    else:
-        s3_metrics = {"s3_disabled": "S3 not configured (S3_ENDPOINT not set)"}
-
-    metrics = {**mysql_metrics, **pg_metrics, **s3_metrics}
-
-    template_start = time.time()
-
-    # Render the template here, just to measure the performance
-    response = render_template("index.html", metrics=metrics, version=versionString)
-
-    metrics["template_read_time"] = round((time.time() - template_start) * 1000, 2)
+    _, template_time = time_operation(render_page)()
+    metrics["template_read_time"] = template_time
     metrics["total_time"] = round((time.time() - start_time) * 1000, 2)
 
-    # Fill in the newly recorded metrics before returning
-    return render_template("index.html", metrics=metrics, version=versionString)
+    return render_template("index.html", metrics=metrics, version=VERSION)
 
 
 @app.route("/reconnect", methods=["POST"])
-def reconnect():
+def reconnect() -> Union[Response, Tuple[Response, int]]:
     start_time = time.time()
     logger.info("Processing reconnect request")
 
-    # Run service tests with timeout
-    mysql_future = executor.submit(collect_db_stats) if mysql_host else None
-    pg_future = executor.submit(collect_pg_stats) if postgres_host else None
-    s3_future = executor.submit(collect_s3_stats) if s3_endpoint else None
-
-    try:
-        mysql_metrics = (
-            mysql_future.result(timeout=TIMEOUT_SECONDS)
-            if mysql_future
-            else {"mysql_disabled": "MariaDB/MySQL not configured (DB_HOST not set)"}
-        )
-        pg_metrics = (
-            pg_future.result(timeout=TIMEOUT_SECONDS)
-            if pg_future
-            else {"postgres_disabled": "PostgreSQL not configured (PG_HOST not set)"}
-        )
-        s3_metrics = (
-            s3_future.result(timeout=TIMEOUT_SECONDS)
-            if s3_future
-            else {"s3_disabled": "S3 not configured (S3_ENDPOINT not set)"}
-        )
-    except TimeoutError:
-        logger.error("Timeout waiting for service tests")
+    metrics, timeout_error = collect_all_metrics()
+    if timeout_error:
         return jsonify({"error": "Service request timed out"}), 504
 
-    metrics = {**mysql_metrics, **pg_metrics, **s3_metrics}
+    # Template rendering performance (for timing only)
+    def render_page() -> str:
+        return render_template("index.html", metrics=metrics, version=VERSION)
 
-    template_start = time.time()
-    render_template("index.html", metrics=metrics, version=versionString)
-    metrics["template_read_time"] = round((time.time() - template_start) * 1000, 2)
-
+    _, template_time = time_operation(render_page)()
+    metrics["template_read_time"] = template_time
     metrics["total_time"] = round((time.time() - start_time) * 1000, 2)
 
     return jsonify(metrics)
 
 
 @app.route("/favicon.ico")
-def favicon():
+def favicon() -> Response:
     return app.send_static_file("favicon.ico")
 
 
