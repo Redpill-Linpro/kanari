@@ -112,6 +112,9 @@
         {% endif %}
 
         <h2>S3 Stats</h2>
+        {% if metrics.s3_disabled %}
+        <p class="info-text">{{ metrics.s3_disabled }}</p>
+        {% else %}
         <table class="metrics-table">
             <thead>
                 <tr>
@@ -153,6 +156,7 @@
                 {% endif %}
             </tbody>
         </table>
+        {% endif %}
 
         <h2>Template Performance</h2>
         <table class="metrics-table">
