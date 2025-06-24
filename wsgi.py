@@ -14,7 +14,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from typing import Dict, Any, Tuple, Optional, Callable, Union
 
-VERSION = "1.3.2"
+VERSION = "1.3.3"
 
 logging.basicConfig(
     level=logging.INFO,

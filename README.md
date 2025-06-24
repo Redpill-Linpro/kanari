@@ -46,5 +46,5 @@ Of the previous version, before PostgreSQL support was added:
 
 ### General info
 
-* Version: 1.3.2
+* Version: 1.3.3
 * License: BSD-3
