@@ -209,14 +209,23 @@
                     'Content-Type': 'application/json'
                 }
             })
-            .then(response => response.json())
+            .then(response => {
+                if (!response.ok) {
+                    loadingEl.classList.add('hidden');
+                    alert('Service request timed out. Please try again.');
+                    return;
+                }
+                return response.json();
+            })
             .then(data => {
-                window.location.reload();
+                if (data) {
+                    window.location.reload();
+                }
             })
             .catch(error => {
                 console.error('Error:', error);
                 loadingEl.classList.add('hidden');
-                alert('Error refreshing statistics: ' + error);
+                alert('Error refreshing statistics: ' + error.message);
             });
         });
     </script>
