@@ -9,7 +9,7 @@
 </head>
 <body>
     <main>
-        <h1>Kanari {{ version }}</h1>
+        <h1>Kanari</h1>
 
         {% if metrics.error %}
         <section class="result invalid">
@@ -191,12 +191,15 @@
             </tbody>
         </table>
 
-        <button id="reconnect-btn" class="button">Refresh All Statistics</button>
+        <button id="reconnect-btn" class="button">Refresh Stats</button>
 
         <div id="loading" class="loading hidden">Running tests...</div>
         <div id="error-message" class="result invalid hidden"></div>
 
-        <footer>Alexander F. Rødseth &lt;alerod@redpill-linpro.com&gt; for Redpill-Linpro, BSD-3 licensed</footer>
+        <footer>
+          <p>Alexander F. Rødseth &lt;alerod@redpill-linpro.com&gt; for Redpill-Linpro, BSD-3 licensed</p>
+          <p>Kanari version {{ version }}</p>
+        </footer>
     </main>
 
     <script>
