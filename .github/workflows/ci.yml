@@ -44,10 +44,23 @@ jobs:
         run: |
           find . -name "*.py" -type f -exec python -m py_compile {} +
         continue-on-error: true
+      - name: Wait for PostgreSQL to be ready
+        run: |
+          for i in {1..30}; do
+            if PGPASSWORD=testpass pg_isready -h localhost -U testuser -d testdb; then
+              echo "PostgreSQL is ready"
+              break
+            fi
+            echo "Waiting for PostgreSQL... ($i/30)"
+            sleep 2
+          done
       - name: Set up test database schema
         run: |
           PGPASSWORD=testpass psql -h localhost -U testuser -d testdb -c "CREATE TABLE IF NOT EXISTS kanari (id SERIAL PRIMARY KEY, data TEXT);"
           PGPASSWORD=testpass psql -h localhost -U testuser -d testdb -c "INSERT INTO kanari (data) VALUES ('test data') ON CONFLICT DO NOTHING;"
+      - name: Verify PostgreSQL connection
+        run: |
+          PGPASSWORD=testpass psql -h localhost -U testuser -d testdb -c "SELECT COUNT(*) FROM kanari;" || exit 1
       - name: Run Flask app in background (no services configured)
         run: |
           python -m flask --app wsgi.py run --port=5000 &
@@ -77,11 +90,12 @@ jobs:
         run: |
           python -m flask --app wsgi.py run --port=5004 &
           echo $! > flask_pg_working.pid
-          sleep 5
+          sleep 8
           set -e
-          STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 http://127.0.0.1:5004/)
+          STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 http://127.0.0.1:5004/)
           if [ "$STATUS_CODE" -ne 200 ]; then
             echo "Expected 200 (PostgreSQL working), got $STATUS_CODE"
+            curl -s http://127.0.0.1:5004/ || true
             exit 1
           fi
           echo "✓ PostgreSQL connection working initially"
@@ -91,8 +105,8 @@ jobs:
           fi
       - name: Stop PostgreSQL service
         run: |
-          docker stop $(docker ps -q --filter "ancestor=postgres:16")
-          sleep 3
+          docker stop $(docker ps -q --filter "ancestor=postgres:16") || true
+          sleep 5
       - name: Test PostgreSQL failure returns 504
         env:
           PG_HOST: "localhost"
@@ -117,7 +131,7 @@ jobs:
           fi
       - name: Test MySQL timeout returns 504
         env:
-          DB_HOST: "10.255.255.1"  # RFC1918 non-routed address - will timeout
+          DB_HOST: "10.255.255.1"
           DB_PORT: "3306"
           DB_NAME: "test"
           DB_USER: "test"
@@ -138,7 +152,7 @@ jobs:
           fi
       - name: Test PostgreSQL timeout returns 504
         env:
-          PG_HOST: "10.255.255.2"  # RFC1918 non-routed address - will timeout
+          PG_HOST: "10.255.255.2"
           PG_PORT: "5432"
           PG_DATABASE: "test"
           PG_USER: "test"
@@ -161,7 +175,7 @@ jobs:
         env:
           S3_ACCESS_KEY: "test_key"
           S3_SECRET_KEY: "test_secret"
-          S3_ENDPOINT: "http://10.255.255.3:9000"  # Unreachable S3 endpoint
+          S3_ENDPOINT: "http://10.255.255.3:9000"
           S3_BUCKET: "test-bucket"
         run: |
           python -m flask --app wsgi.py run --port=5003 &
