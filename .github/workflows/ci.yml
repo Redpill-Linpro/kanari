@@ -56,11 +56,11 @@ jobs:
           done
       - name: Set up test database schema
         run: |
-          PGPASSWORD=testpass psql -h localhost -U testuser -d testdb -c "CREATE TABLE IF NOT EXISTS kanari (id SERIAL PRIMARY KEY, data TEXT);"
-          PGPASSWORD=testpass psql -h localhost -U testuser -d testdb -c "INSERT INTO kanari (data) VALUES ('test data') ON CONFLICT DO NOTHING;"
+          PGPASSWORD=testpass psql -h localhost -U testuser -d testdb -c "CREATE TABLE IF NOT EXISTS testdb (id SERIAL PRIMARY KEY, data TEXT);"
+          PGPASSWORD=testpass psql -h localhost -U testuser -d testdb -c "INSERT INTO testdb (data) VALUES ('test data') ON CONFLICT DO NOTHING;"
       - name: Verify PostgreSQL connection
         run: |
-          PGPASSWORD=testpass psql -h localhost -U testuser -d testdb -c "SELECT COUNT(*) FROM kanari;" || exit 1
+          PGPASSWORD=testpass psql -h localhost -U testuser -d testdb -c "SELECT COUNT(*) FROM testdb;" || exit 1
       - name: Run Flask app in background (no services configured)
         run: |
           python -m flask --app wsgi.py run --port=5000 &
