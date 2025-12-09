@@ -22,4 +22,9 @@ RUN pip3 install --no-cache-dir -r requirements.txt
 
 EXPOSE 8080
 
+# Gunicorn uses 1 worker with 1 thread by default.
+# The following might be a good idea, but it depends on the number of CPUs
+# and also if this will make the performance less predictable.
+#CMD ["python3", "-m", "gunicorn", "--workers=5", "--threads=2", "--bind=0.0.0.0:8080", "wsgi:app"]
+
 CMD ["python3", "-m", "gunicorn", "--bind", "0.0.0.0:8080", "wsgi:app"]
