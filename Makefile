@@ -8,6 +8,9 @@ all:
 	@echo "make run         - install deps with pip and serve as dev on port 5000"
 	@echo "make clean       - remove temporary files"
 
+fmt:
+	black wsgi.py
+
 run: install_deps
 	python3 -m flask --app wsgi.py run
 
