@@ -4,7 +4,7 @@
 
 MariaDB/MySQL, PostgreSQL, S3 and HTTP benchmark/status application for the Cloud, that uses Python and Flask.
 
-All services have 3 seconds to respond. If they time out, `504 Gateway Timeout` is returned.
+All services have 3 seconds to respond. If any of them time out, `504 Gateway Timeout` is returned.
 
 ### Screenshot
 
